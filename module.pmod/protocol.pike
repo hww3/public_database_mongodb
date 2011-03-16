@@ -37,21 +37,21 @@ string gen_header(int type, int responseTo, int requestId, string mesg)
 	return sprintf("%4c%4c%4c%4c", 16+sizeof(mesg), requestId, responseTo, type);
 }
 
-string gen_op_update(int requestId, string collectionName, int flags, mixed selector, mixed update)
+string gen_op_update(int requestId, string collectionName, int flags, mapping selector, mapping update)
 {
-	string up = sprintf("%4c%s%4c%s%s", 0, toCString(collectionName), flags, toBSON(selector), toBSON(update));
+	string up = sprintf("%4c%s%4c%s%s", 0, toCString(collectionName), flags, BSON.toDocument(selector), map(update, BSON.toDocument)*"");
 	return gen_header(OP_UPDATE, 0, requestId|| random(99999999), up) + up;
 }
 
 string gen_op_insert(int requestId, string collectionName, array documents)
 {
-	string up = sprintf("%4c%s%s", 0, toCString(collectionName), toBSON(documents));
+	string up = sprintf("%4c%s%s", 0, toCString(collectionName), BSON.toDocument(documents));
 	return gen_header(OP_INSERT, 0, requestId|| random(99999999), up) + up;
 }
 
-string gen_op_query(int requestId, string collectionName, int flags, mixed query, int start, int quantity, mixed|void returnFields)
+string gen_op_query(int requestId, string collectionName, int flags, mapping query, int start, int quantity, mapping|void returnFields)
 {
-	string up = sprintf("%4c%s%4c%4c%s%s", flags, toCString(collectionName), numbertoSkip, numberToReturn, toBSON(query), (returnFields?toBSON(returnFields):""));
+	string up = sprintf("%4c%s%4c%4c%s%s", flags, toCString(collectionName), numbertoSkip, numberToReturn, BSON.toDocument(query), (returnFields?BSON.toDocument(returnFields):""));
 	return gen_header(OP_QUERY, 0, requestId|| random(99999999), up) + up;	
 }
 
@@ -72,3 +72,4 @@ string gen_op_kill_cursors(int requestId, array(int) cursorsToKill)
 	string up = sprintf("%4c%4c%{%8c}", 0, sizeof(cursorsToKill), cursorsToKill);
 	return gen_header(OP_KILL_CURSORS, 0, requestId|| random(99999999), up) + up;	
 }
+
