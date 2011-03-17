@@ -15,19 +15,24 @@ constant TYPE_NULL = 0x0a;
 constant TYPE_REGEX = 0x0b;
 constant TYPE_INT32 = 0x10;
 constant TYPE_INT64 = 0x12;
-
+constant TYPE_MIN_KEY = 0xff;
+constant TYPE_MAX_KEY = 0x7f;
+constant TYPE_SYMBOL = 0x0e;
+constant TYPE_BINARY = 0x05;
+constant TYPE_JAVASCRIPT = 0x0D;
+constant TYPE_TIMESTAMP = 0x11;
 
 /* TODO: still need to support the following types:
-
-	| 	"\x05" e_name binary 	Binary data
-	| 	"\x0B" e_name cstring cstring 	Regular expression
-	| 	"\x0D" e_name string 	JavaScript code
-	| 	"\x0E" e_name string 	Symbol
 	| 	"\x0F" e_name code_w_s 	JavaScript code w/ scope
-	| 	"\x11" e_name int64 	Timestamp
-	| 	"\xFF" e_name 	Min key
-	| 	"\x7F" e_name 	Max key	
 */
+
+// binary data subtypes
+constant BINARY_GENERIC = 0x00;
+constant BINARY_FUNCTION = 0x01;
+constant BINARY_OLD = 0x02;
+constant BINARY_UUID = 0x03;
+constant BINARY_MD5 = 0x05;
+constant BINARY_USER = 0x80;
 
 int getCounter()
 {
@@ -42,6 +47,11 @@ string toDocument(mapping m)
   return sprintf("%-4c%s%c", sizeof(buf)+5, buf->get(), 0);
 }
 
+static string toCString(string str)
+{
+	if(search(str, "\0") != -1) throw(Error.Generic("String cannot contain null bytes.\n"));
+	else return string_to_utf8(str) + "\0";
+}
 
 static void encode(mixed m, String.Buffer buf)
 {
@@ -90,27 +100,73 @@ static void encode_value(string key, mixed value, String.Buffer buf)
        buf->add(sprintf("%c%s%c%-8c", TYPE_INT64, key, 0, value));       
      }
    }
+   // Calendar instance
    else if(objectp(value) && value->unix_time && value->utc_offset) // a date object
    {
      buf->add(sprintf("%c%s%c%-8c", TYPE_DATETIME, key, 0, (value->unix_time() /* + value->utc_offset() */ * 1000)));
    }
-   else if(objectp(value) && Program.implements(object_program(value), BSON.ObjectId))
+   // BSON.ObjectId instance
+   else if(objectp(value) && Program.inherits(object_program(value), BSON.ObjectId))
    {
      buf->add(sprintf("%c%s%c%12s", TYPE_OBJECTID, key, 0, value->get_id()));
    }
+   // BSON.Timestamp instance
+   else if(objectp(value) && Program.inherits(object_program(value), BSON.Timestamp))
+   {
+     buf->add(sprintf("%c%s%c%-8s", TYPE_TIMESTAMP, key, 0, value->get_timestamp()));
+   }
+
+   // BSON.Binary instance
+   else if(objectp(value) && Program.inherits(object_program(value), BSON.Binary))
+   {
+     buf->add(sprintf("%c%s%c%-4c%s%c", TYPE_BINARY, key, 0, sizeof(value)+1, value->subtype, (string)value, 0));
+   }
+   // BSON.Symbol instance
+   else if(objectp(value) && Program.inherits(object_program(value), BSON.Symbol))
+   {
+     string v = (string)value;
+     v = string_to_utf8(v);
+     buf->add(sprintf("%c%s%c%-4c%s%c", TYPE_SYMBOL, key, 0, sizeof(v)+1, v, 0));
+   } 
+   // BSON.Javascript instance
+   else if(objectp(value) && Program.inherits(object_program(value), BSON.Javascript))
+   {
+     string v = (string)value;
+     v = string_to_utf8(v);
+     buf->add(sprintf("%c%s%c%-4c%s%c", TYPE_JAVASCRIPT, key, 0, sizeof(v)+1, v, 0));
+   } 
+   // BSON.Regex instance
+   else if(objectp(value) && Program.inherits(object_program(value), BSON.Regex))
+   {
+     string v = (string)value;
+     v = string_to_utf8(v);
+     buf->add(sprintf("%c%s%c%-4c%s%c", TYPE_REGEX, key, 0, toCString(value->regex), toCString(value->options));
+   } 
+   // BSON.Null
    else if(objectp(value) && value == Null)
    {
      buf->add(sprintf("%c%s%c", TYPE_NULL, key, 0));
    }
+   // BSON.True
    else if(objectp(value) && value == True)
    {
      buf->add(sprintf("%c%s%c%c", TYPE_BOOLEAN, key, 0, 1));
    }
+   // BSON.False
    else if(objectp(value) && value == False)
    {
      buf->add(sprintf("%c%s%c%c", TYPE_BOOLEAN, key, 0, 0));
    }
-   
+   // BSON.MinKey
+   else if(objectp(value) && value->BSONMaxKey)
+   {
+     buf->add(sprintf("%c%s%c", TYPE_MIN_KEY, key, 0, 0));
+   }
+   // BSON.MaxKey
+   else if(objectp(value) && value->BSONMaxKey)
+   {
+     buf->add(sprintf("%c%s%c", TYPE_MAX_KEY, key, 0, 0));
+   }
    //werror("bufsize: %O\n", sizeof(buf));
 }
 
@@ -197,6 +253,44 @@ static string decode_next_value(string slist, mapping list)
          throw(Error.Generic("Unable to read string from BSON stream.\n")); 
  	value = utf8_to_string(value);
        break;
+     case TYPE_BINARY:
+       int len, subtype;
+       if(sscanf(slist, "%-4c%s", len, slist) != 2)
+         throw(Error.Generic("Unable to read binary length from BSON stream.\n")); 
+ 	if(sscanf(slist, "%c%" + (len-1) + "s\0%s", subtype, value, slist) != 2)
+         throw(Error.Generic("Unable to read binary from BSON stream.\n")); 
+ 	value = .Binary(value, subtype);
+       break;
+     case TYPE_JAVASCRIPT:
+       int len;
+       if(sscanf(slist, "%-4c%s", len, slist) != 2)
+         throw(Error.Generic("Unable to read javascript length from BSON stream.\n")); 
+ 	if(sscanf(slist, "%" + (len-1) + "s\0%s", value, slist) != 2)
+         throw(Error.Generic("Unable to read javascript from BSON stream.\n")); 
+ 	value = .Javascript(utf8_to_string(value));
+       break;
+     case TYPE_SYMBOL:
+       int len;
+       if(sscanf(slist, "%-4c%s", len, slist) != 2)
+         throw(Error.Generic("Unable to read symbol length from BSON stream.\n")); 
+ 	if(sscanf(slist, "%" + (len-1) + "s\0%s", value, slist) != 2)
+         throw(Error.Generic("Unable to read symbol from BSON stream.\n")); 
+ 	value = .Symbol(utf8_to_string(value));
+       break;
+     case TYPE_REGEX:
+       int len;
+       string regex, options;
+       
+       if(sscanf(slist, "%s\0%s", regex, slist)!=2)
+         throw(Error.Generic("Unable to read regex from BSON stream.\n")); 
+       regex = utf8_to_string(regex);
+       
+       if(sscanf(slist, "%s\0%s", options, slist)!=2)
+         throw(Error.Generic("Unable to read regex options from BSON stream.\n"));        
+       options = utf8_to_string(options);
+       value = .Regex(regex, options);
+       break;     
+       
      case TYPE_INT32:     
        if(sscanf(slist, "%-4c%s", value, slist) != 2)
          throw(Error.Generic("Unable to read int32 from BSON stream.\n")); 
@@ -210,6 +304,11 @@ static string decode_next_value(string slist, mapping list)
          throw(Error.Generic("Unable to read object id from BSON stream.\n")); 
  	value = .ObjectId(value);
        break;
+     case TYPE_TIMESTAMP:
+       if(sscanf(slist, "%-12c%s", value, slist) != 2)
+         throw(Error.Generic("Unable to read timestamp from BSON stream.\n")); 
+ 	value = .Timestamp(value);
+       break;  
      case TYPE_BOOLEAN:
        if(sscanf(slist, "%c%s", value, slist) != 2)
          throw(Error.Generic("Unable to read boolean from BSON stream.\n")); 
@@ -218,6 +317,12 @@ static string decode_next_value(string slist, mapping list)
        break;
      case TYPE_NULL:
        value = Null;
+       break;
+     case TYPE_MIN_KEY:
+       value = MinKey;
+       break;
+     case TYPE_MAX_KEY:
+       value = MaxKey;
        break;
      case TYPE_DATETIME:
        if(sscanf(slist, "%-8c%s", value, slist) != 2)
@@ -265,6 +370,12 @@ object True = true_object();
 //!
 object False = false_object();
 
+//!
+object MinKey = minkey_object();
+
+//!
+object MaxKey = maxkey_object();
+
 class false_object
 {
   constant BSONFalse = 1;
@@ -278,16 +389,38 @@ class false_object
   }
 }
 
-class true_object
+class false_object
 {
-  constant BSONTrue = 1;
+  constant BSONFalse = 1;
 
   static mixed cast(string type)
   {
     if(type == "string")
       return "false";
     if(type == "int")
-      return 1;
+      return 0;
+  }
+}
+
+class maxkey_object
+{
+  constant BSONMaxKey = 1;
+
+  static mixed cast(string type)
+  {
+    if(type == "string")
+      return "MinKey";
+  }
+}
+
+class minkey_object
+{
+  constant BSONMinKey = 1;
+
+  static mixed cast(string type)
+  {
+    if(type == "string")
+      return "MinKey";
   }
 }
 
