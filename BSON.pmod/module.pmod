@@ -77,16 +77,16 @@ static void encode_value(string key, mixed value, String.Buffer buf)
    }
    else if(intp(value))
    {
-   	   werror("have int\n");
+   	   // werror("have int\n");
      // 32 bit or 64 bit?
      if(value <= 2147383647 && value >= -2148483648) // we fit in a 32 bit space.
      {
-     	     werror("32bit\n");
+     	     // werror("32bit\n");
        buf->add(sprintf("%c%s%c%-4c", TYPE_INT32, key, 0, value));       
      }
      else
      {
-     	     werror("64bit\n");
+     	     // werror("64bit\n");
        buf->add(sprintf("%c%s%c%-8c", TYPE_INT64, key, 0, value));       
      }
    }
@@ -123,7 +123,7 @@ mixed fromDocument(string bson)
     throw(Error.Generic("Unable to read length from BSON stream.\n"));
   if(sscanf(bson, "%" + (len-5) + "s\0", slist) != 1)
     throw(Error.Generic("Unable to read full data from BSON stream.\n"));
-
+//werror("bson length %d\n", len);
   mapping list = ([]);
   
   do
@@ -131,8 +131,40 @@ mixed fromDocument(string bson)
     slist = decode_next_value(slist, list);
   } while(sizeof(slist));
   
-  return list;
+  return list;	
+}
+
+string toDocumentArray(array documents)
+{
+	String.Buffer buf = String.Buffer();
 	
+	foreach(documents;;mixed document)
+	{
+		buf->add(toDocument(document));
+	}
+	
+	return buf->get();
+}
+
+array fromDocumentArray(string bsonarray)
+{
+  array a = ({});
+
+  while(sizeof(bsonarray))
+  {
+	string bson;
+	int len;
+	
+ 	if(sscanf(bsonarray, "%-4c", len)!=1)
+	  throw(Error.Generic("Unable to read length from BSON stream.\n"));
+ 	if(sscanf(bsonarray, "%" + len + "s%s", bson, bsonarray) != 2)
+	  throw(Error.Generic("Unable to read full data from BSON stream.\n"));
+//	werror("parsing BSON: %O\n", bson);
+	a+=({fromDocument(bson)});
+//	werror("bsonarray: %O\n", bsonarray);
+  }
+//  werror("done parsing.\n");
+  return a;
 }
 
 static string decode_next_value(string slist, mapping list)
@@ -220,7 +252,7 @@ static string decode_next_value(string slist, mapping list)
   }
   
   list[key] = value;
-  werror("type: %d key %s\n", type, key);
+  // werror("type: %d key %s\n", type, key);
   return slist;
 }
 

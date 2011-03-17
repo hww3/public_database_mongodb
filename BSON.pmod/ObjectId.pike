@@ -41,3 +41,8 @@ string get_id()
 { 
   return id;
 }
+
+string _sprintf(mixed t)
+{
+	return "ObjectId(" + String.string2hex(id) + ")";
+}
