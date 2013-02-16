@@ -39,10 +39,13 @@ int getCounter()
 }
 
 //!
-string toDocument(mapping m)
+//! @param query_mode
+//!  if set to true, encoding will allow "$" and "." in key names, which
+//!   would normally be disallowed.
+string toDocument(mapping m, int|void query_mode)
 {
   String.Buffer buf = String.Buffer();
-  encode(m, buf);
+  encode(m, buf, query_mode);
   return sprintf("%-4c%s%c", sizeof(buf)+5, buf->get(), 0);
 } 
 
@@ -52,19 +55,20 @@ static string toCString(string str)
 	else return string_to_utf8(str) + "\0";
 }
 
-static void encode(mixed m, String.Buffer buf)
+static void encode(mixed m, String.Buffer buf, int|void allow_specials)
 {
   foreach(m; mixed key; mixed val)
   {
     if(!stringp(key)) throw(Error.Generic("BSON Keys must be strings.\n"));
     if(search(key, "\0") != -1) throw(Error.Generic("BSON Keys may not contain NULL characters.\n"));   
-    
+    if(((key - "$") - ".") != key)
+      throw(Error.Generic("BSON keys may not contain '$' or '.' characters unless in query-mode.\n"));
     key = string_to_utf8(key);
-    encode_value(key, val, buf);
+    encode_value(key, val, buf, allow_specials);
   }	
 }
 
-static void encode_value(string key, mixed value, String.Buffer buf)
+static void encode_value(string key, mixed value, String.Buffer buf, int|void allow_specials)
 {
    if(floatp(value))
    { 
@@ -77,12 +81,12 @@ static void encode_value(string key, mixed value, String.Buffer buf)
    }
    else if(mappingp(value))
    {
-     buf->add(sprintf("%c%s%c%s", TYPE_DOCUMENT, key, 0, toDocument(value)));
+     buf->add(sprintf("%c%s%c%s", TYPE_DOCUMENT, key, 0, toDocument(value, allow_specials)));
    }
    else if(arrayp(value))
    {
      int qi = 0; 
-     buf->add(sprintf("%c%s%c%s", TYPE_ARRAY, key, 0, toDocument(mkmapping(map(value, lambda(mixed e){return (string)qi++;}), value))));
+     buf->add(sprintf("%c%s%c%s", TYPE_ARRAY, key, 0, toDocument(mkmapping(map(value, lambda(mixed e){return (string)qi++;}), value), allow_specials)));
    }
    else if(intp(value))
    {
