@@ -43,8 +43,8 @@ string toDocument(mapping m)
 {
   String.Buffer buf = String.Buffer();
   encode(m, buf);
-  return sprintf("%-4c%s%c", sizeof(buf)+1, buf->get(), 0);
-}
+  return sprintf("%-4c%s%c", sizeof(buf)+5, buf->get(), 0);
+} 
 
 static string toCString(string str)
 {
@@ -176,16 +176,17 @@ mixed fromDocument(string bson)
   string slist;
   if(sscanf(bson, "%-4c%s", len, bson)!=2)
     throw(Error.Generic("Unable to read length from BSON stream.\n"));
-  if(sizeof(bson) > (len -5))
-    throw(Error.Generic(sprintf("Unable to read full data from BSON stream, expected %d, got %d.\n", len-5, sizeof(bson)-1)));
-  slist = bson[0..<1];
+  if(sizeof(bson) < (len -4))
+    throw(Error.Generic(sprintf("Unable to read full data from BSON stream, expected %d, got %d.\n", len-4, sizeof(bson)-1)));
+  slist = bson[0..<1  ];
 //werror("bson length %d\n", len);
   mapping list = ([]);
   
   do
   {
     slist = decode_next_value(slist, list);
-werror("read item: %O, left: %O", list, slist);
+werror("sizeof: %O\n", sizeof(slist));
+//werror("read item: %O, left: %O", list, slist);
   } while(sizeof(slist));
   
   return list;	
@@ -245,8 +246,11 @@ werror("key: %s type: %d\n", key, type);
   {
      int len, subtype;
      case TYPE_FLOAT:
-       if(sscanf(slist, "%8F%s", value, slist) != 2)
+       if(sscanf(slist, "%-8s%s", value, slist) != 2)
          throw(Error.Generic("Unable to read float from BSON stream.\n")); 
+       if(sscanf(reverse(value), "%8F", value) != 1 )
+         throw(Error.Generic("Unable to read float from BSON stream.\n")); 
+      
        break;
      case TYPE_STRING:
        if(sscanf(slist, "%-4c%s", len, slist) != 2)
@@ -331,8 +335,9 @@ werror("key: %s type: %d\n", key, type);
      case TYPE_DOCUMENT:
        if(sscanf(slist, "%-4c", doclen) != 1)
        	 throw(Error.Generic("Unable to read embedded document length\n"));
-       if(sscanf(slist, "%" + (doclen) + "s%s", document, slist) !=2)
+       if(!sscanf(slist, "%" + (doclen) + "s%s", document, slist))
        	 throw(Error.Generic("Unable to read specified length for embedded document.\n"));
+werror("document: %O\n", document);
        value = fromDocument(document);
        break;
      case TYPE_ARRAY:
