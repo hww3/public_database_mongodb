@@ -61,7 +61,7 @@ static void encode(mixed m, String.Buffer buf, int|void allow_specials)
   {
     if(!stringp(key)) throw(Error.Generic("BSON Keys must be strings.\n"));
     if(search(key, "\0") != -1) throw(Error.Generic("BSON Keys may not contain NULL characters.\n"));   
-    if(((key - "$") - ".") != key)
+    if(!allow_specials && ((key - "$") - ".") != key)
       throw(Error.Generic("BSON keys may not contain '$' or '.' characters unless in query-mode.\n"));
     key = string_to_utf8(key);
     encode_value(key, val, buf, allow_specials);
