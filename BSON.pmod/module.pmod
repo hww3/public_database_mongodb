@@ -18,7 +18,6 @@ constant TYPE_INT64 = 0x12;
 constant TYPE_MIN_KEY = 0xff;
 constant TYPE_MAX_KEY = 0x7f;
 constant TYPE_SYMBOL = 0x0e;
-constant TYPE_BINARY = 0x05;
 constant TYPE_JAVASCRIPT = 0x0D;
 constant TYPE_TIMESTAMP = 0x11;
 
@@ -44,7 +43,7 @@ string toDocument(mapping m)
 {
   String.Buffer buf = String.Buffer();
   encode(m, buf);
-  return sprintf("%-4c%s%c", sizeof(buf)+5, buf->get(), 0);
+  return sprintf("%-4c%s%c", sizeof(buf)+1, buf->get(), 0);
 }
 
 static string toCString(string str)
@@ -69,7 +68,7 @@ static void encode_value(string key, mixed value, String.Buffer buf)
 {
    if(floatp(value))
    { 
-     buf->add(sprintf("%c%s%c%8F", TYPE_FLOAT, key, 0, value));
+     buf->add(sprintf("%c%s%c%-8F", TYPE_FLOAT, key, 0, value));
    }
    else if(stringp(value))
    {
@@ -119,7 +118,7 @@ static void encode_value(string key, mixed value, String.Buffer buf)
    // BSON.Binary instance
    else if(objectp(value) && Program.inherits(object_program(value), BSON.Binary))
    {
-     buf->add(sprintf("%c%s%c%-4c%s%c", TYPE_BINARY, key, 0, sizeof(value)+1, value->subtype, (string)value, 0));
+     buf->add(sprintf("%c%s%c%-4c%c%s", TYPE_BINARY, key, 0, sizeof(value)+1, value->subtype, (string)value));
    }
    // BSON.Symbol instance
    else if(objectp(value) && Program.inherits(object_program(value), BSON.Symbol))
@@ -140,7 +139,7 @@ static void encode_value(string key, mixed value, String.Buffer buf)
    {
      string v = (string)value;
      v = string_to_utf8(v);
-     buf->add(sprintf("%c%s%c%-4c%s%c", TYPE_REGEX, key, 0, toCString(value->regex), toCString(value->options));
+     buf->add(sprintf("%c%s%c%s%s", TYPE_REGEX, key, 0, toCString(value->regex), toCString(value->options)));
    } 
    // BSON.Null
    else if(objectp(value) && value == Null)
@@ -160,12 +159,12 @@ static void encode_value(string key, mixed value, String.Buffer buf)
    // BSON.MinKey
    else if(objectp(value) && value->BSONMaxKey)
    {
-     buf->add(sprintf("%c%s%c", TYPE_MIN_KEY, key, 0, 0));
+     buf->add(sprintf("%c%s%c", TYPE_MIN_KEY, key, 0));
    }
    // BSON.MaxKey
    else if(objectp(value) && value->BSONMaxKey)
    {
-     buf->add(sprintf("%c%s%c", TYPE_MAX_KEY, key, 0, 0));
+     buf->add(sprintf("%c%s%c", TYPE_MAX_KEY, key, 0));
    }
    //werror("bufsize: %O\n", sizeof(buf));
 }
@@ -177,14 +176,16 @@ mixed fromDocument(string bson)
   string slist;
   if(sscanf(bson, "%-4c%s", len, bson)!=2)
     throw(Error.Generic("Unable to read length from BSON stream.\n"));
-  if(sscanf(bson, "%" + (len-5) + "s\0", slist) != 1)
-    throw(Error.Generic("Unable to read full data from BSON stream.\n"));
+  if(sizeof(bson) > (len -5))
+    throw(Error.Generic(sprintf("Unable to read full data from BSON stream, expected %d, got %d.\n", len-5, sizeof(bson)-1)));
+  slist = bson[0..<1];
 //werror("bson length %d\n", len);
   mapping list = ([]);
   
   do
   {
     slist = decode_next_value(slist, list);
+werror("read item: %O, left: %O", list, slist);
   } while(sizeof(slist));
   
   return list;	
@@ -239,14 +240,15 @@ static string decode_next_value(string slist, mapping list)
 
   key = utf8_to_string(key);
 
+werror("key: %s type: %d\n", key, type);
   switch(type)
   {
+     int len, subtype;
      case TYPE_FLOAT:
        if(sscanf(slist, "%8F%s", value, slist) != 2)
          throw(Error.Generic("Unable to read float from BSON stream.\n")); 
        break;
      case TYPE_STRING:
-       int len;
        if(sscanf(slist, "%-4c%s", len, slist) != 2)
          throw(Error.Generic("Unable to read string length from BSON stream.\n")); 
  	if(sscanf(slist, "%" + (len-1) + "s\0%s", value, slist) != 2)
@@ -254,7 +256,6 @@ static string decode_next_value(string slist, mapping list)
  	value = utf8_to_string(value);
        break;
      case TYPE_BINARY:
-       int len, subtype;
        if(sscanf(slist, "%-4c%s", len, slist) != 2)
          throw(Error.Generic("Unable to read binary length from BSON stream.\n")); 
  	if(sscanf(slist, "%c%" + (len-1) + "s\0%s", subtype, value, slist) != 2)
@@ -262,7 +263,6 @@ static string decode_next_value(string slist, mapping list)
  	value = .Binary(value, subtype);
        break;
      case TYPE_JAVASCRIPT:
-       int len;
        if(sscanf(slist, "%-4c%s", len, slist) != 2)
          throw(Error.Generic("Unable to read javascript length from BSON stream.\n")); 
  	if(sscanf(slist, "%" + (len-1) + "s\0%s", value, slist) != 2)
@@ -270,7 +270,6 @@ static string decode_next_value(string slist, mapping list)
  	value = .Javascript(utf8_to_string(value));
        break;
      case TYPE_SYMBOL:
-       int len;
        if(sscanf(slist, "%-4c%s", len, slist) != 2)
          throw(Error.Generic("Unable to read symbol length from BSON stream.\n")); 
  	if(sscanf(slist, "%" + (len-1) + "s\0%s", value, slist) != 2)
@@ -278,7 +277,6 @@ static string decode_next_value(string slist, mapping list)
  	value = .Symbol(utf8_to_string(value));
        break;
      case TYPE_REGEX:
-       int len;
        string regex, options;
        
        if(sscanf(slist, "%s\0%s", regex, slist)!=2)
@@ -389,16 +387,17 @@ class false_object
   }
 }
 
-class false_object
+
+class true_object
 {
-  constant BSONFalse = 1;
+  constant BSONTrue = 1;
 
   static mixed cast(string type)
   {
     if(type == "string")
-      return "false";
+      return "true";
     if(type == "int")
-      return 0;
+      return 1;
   }
 }
 
